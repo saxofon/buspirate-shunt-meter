@@ -1,6 +1,8 @@
 #ifndef __BUSPIRATE_H__
 #define __BUSPIRATE_H__
 
+#define DEBUG
+
 #define BP_DEV_BAUDRATE             115200
 #define BP_MAX_READ_LEN             128
 
@@ -37,7 +39,7 @@ static struct s_bp {
 	int cmd_state;
 	int cmd;
 	int read_length;
-	char buf[BP_MAX_READ_LEN];
+	unsigned char buf[BP_MAX_READ_LEN];
 	void (*adc_read)(unsigned short);
 } bp;
 
@@ -49,6 +51,5 @@ extern int bp_init(struct s_bp *bp, char *dev);
 extern void bp_install_adc_read(struct s_bp *bp, void (*adc_read)(unsigned short));
 extern void bp_read_adc_singleshot(struct s_bp *bp);
 extern void bp_read_adc_continous(struct s_bp *bp);
-
 
 #endif

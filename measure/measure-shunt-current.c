@@ -16,7 +16,7 @@
 
 #define BP_DEV "/dev/buspirate"
 
-#define CONTINOUS
+//#define CONTINOUS
 
 #define NSEC_PER_SEC   1000000000UL
 #define NSEC_PER_MSEC     1000000UL
@@ -31,7 +31,7 @@
 #ifdef CONTINOUS
 #define SAMPLE_PERIOD_US      (1000000.0/(BP_DEV_BAUDRATE/10.0/2.0))
 #else
-#define SAMPLE_PERIOD_US      500000.0
+#define SAMPLE_PERIOD_US      100000.0
 #endif
 
 // Circular buffer storing ADC data
