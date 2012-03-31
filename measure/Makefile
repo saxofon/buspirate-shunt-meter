@@ -4,6 +4,7 @@ LDFLAGS += -lpthread
 LDFLAGS += -lrt 
 
 OBJS += ../common/buspirate.o
+OBJS += ../common/ts.o
 
 APPS += measure-shunt-current
 

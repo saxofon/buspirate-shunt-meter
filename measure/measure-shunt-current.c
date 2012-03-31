@@ -12,26 +12,21 @@
 #include <errno.h>
 #include <asm/ioctls.h>
 
+#include <ts.h>
 #include <buspirate.h>
 
 #define BP_DEV "/dev/buspirate"
 
-//#define CONTINOUS
-
-#define NSEC_PER_SEC   1000000000UL
-#define NSEC_PER_MSEC     1000000UL
-#define NSEC_PER_USEC        1000UL
-#define USEC_PER_SEC      1000000UL
-#define USEC_PER_MSEC        1000UL
-#define MSEC_PER_SEC         1000UL
-
+#define DEBUG
+#undef RT_PRIO
+#define CONTINOUS
 
 // define our sample period
 // for continues mode, this depends on baudrate. We avarage to 10 bits and 2 bytes per read...
 #ifdef CONTINOUS
 #define SAMPLE_PERIOD_US      (1000000.0/(BP_DEV_BAUDRATE/10.0/2.0))
 #else
-#define SAMPLE_PERIOD_US      100000.0
+#define SAMPLE_PERIOD_US      25000.0
 #endif
 
 // Circular buffer storing ADC data
@@ -48,21 +43,8 @@ static struct s_adc {
 	int tail;
 	float period;
 	unsigned short *buf;
+	int average; // amount of samples to avarage over
 } adc;
-
-static struct timespec add_ts(struct timespec time1, struct timespec time2)
-{
-        struct timespec result;
-
-        result.tv_sec = time1.tv_sec + time2.tv_sec;
-        result.tv_nsec = time1.tv_nsec + time2.tv_nsec;
-        if (result.tv_nsec >= 1000000000UL) {
-                result.tv_sec++;
-                result.tv_nsec -= 1000000000UL;
-        }
-
-        return (result);
-}
 
 // adc_head_n_tail_diff return the active amount of sample data
 // retval > 0: active amount of data
@@ -116,7 +98,7 @@ static void adc_sampler(unsigned short reading)
 	status = adc_head_n_tail_update(&adc);
 
 	adc.buf[adc.head] = reading;
-	printf("%s: %f V\n", __FUNCTION__, adc.buf[adc.head]/1024.0*6.6);
+//	printf("%s: %f V\n", __FUNCTION__, adc.buf[adc.head]/1024.0*6.6);
 }
 
 #ifndef CONTINOUS
@@ -131,7 +113,7 @@ static void *adc_trig_sample(void *arg)
 
 	printf ("%s: begin\n", __FUNCTION__);
 
-#if 0
+#ifdef RT_PRIO
 	// setup thread priority
 	threadsched.sched_priority = 10;
 
@@ -140,25 +122,32 @@ static void *adc_trig_sample(void *arg)
 		printf("%s: sched_setscheduler %d\n", __FUNCTION__, status);
 		pthread_exit(&adc_trig_sample_status);
 	}
+#endif
 
 	// never let us be swapped out
 	mlockall(MCL_CURRENT | MCL_FUTURE);
-#endif
 
 	// setup our periodic clock
 	period.tv_sec = adc->period / USEC_PER_SEC;
 	period.tv_nsec = adc->period * NSEC_PER_USEC - 
 			period.tv_sec * NSEC_PER_USEC;
+	ts_normalize(&period);
+
+#ifdef DEBUG
+	printf("%s: period.tv_sec %d period.tv_nsec %d\n",
+		__FUNCTION__, period.tv_sec, period.tv_nsec);
+#endif
 
 	printf ("%s: ready to loop\n", __FUNCTION__);
 	clock_gettime(CLOCK_MONOTONIC, &mark);
 	for (;;) {
-		mark = add_ts(mark, period);
+		mark = ts_add(mark, period);
 		clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &mark, NULL);
 
 		bp_read_adc_singleshot(adc->bp);
 	}
 }
+#endif
 
 static pthread_t adc_sample_avarage_tid;
 static int adc_sample_avarage_status;
@@ -168,10 +157,14 @@ static void *adc_sample_avarage(void * arg)
 	struct timespec mark, period;
 	struct sched_param threadsched;
 	struct s_adc *adc = (struct s_adc *)arg;
+	int start;
+	int average_nr;
+	float average;
+	int i;
 
 	printf ("%s: begin\n", __FUNCTION__);
 
-#if 0
+#ifdef RT_PRIO
 	// setup thread priority
 	threadsched.sched_priority = 9;
 
@@ -180,28 +173,50 @@ static void *adc_sample_avarage(void * arg)
 		printf("%s: sched_setscheduler %d\n", __FUNCTION__, status);
 		pthread_exit(&adc_sample_avarage_status);
 	}
+#endif
 
 	// never let us be swapped out
 	mlockall(MCL_CURRENT | MCL_FUTURE);
-#endif
 
 	// setup our periodic clock
-	period.tv_sec = adc->period / USEC_PER_SEC;
-	period.tv_nsec = adc->period * NSEC_PER_USEC - 
-			period.tv_sec * NSEC_PER_USEC;
+	period.tv_nsec = (adc->period*adc->average) * NSEC_PER_USEC;
+	ts_normalize(&period);
 
-	printf ("%s: ready to loop\n", __FUNCTION__);
-	clock_gettime(CLOCK_MONOTONIC, &mark);
-	for (;;) {
-		mark = add_ts(mark, period);
-		clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &mark, NULL);
-
-		// avarage over X samples
-		printf ("%s: in the loop\n", __FUNCTION__);
-	}
-}
+#ifdef DEBUG
+	printf("%s: period.tv_sec %d period.tv_nsec %d\n",
+		__FUNCTION__, period.tv_sec, period.tv_nsec);
 #endif
 
+	clock_gettime(CLOCK_MONOTONIC, &mark);
+	for (;;) {
+		mark = ts_add(mark, period);
+		clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &mark, NULL);
+
+		// calulate nr of sample to average over
+		average_nr = adc->average;
+		if (average_nr > adc_head_n_tail_diff(adc))
+			average_nr = adc_head_n_tail_diff(adc);
+
+		if (average_nr == 0)
+			average = 1;
+
+		// calculate average
+		start = adc->head - average_nr;
+		if (start < 0)
+			start = BUFSZ + start;
+		average = 0.0;
+		for (i=0; i<average_nr; i++) {
+			average += adc->buf[start++]/1024.0*6.6;
+		}
+		average = average/average_nr;
+
+
+		printf("%s: averaging over %d samples gives %f V\n",
+			__FUNCTION__, average_nr, average);
+
+		
+	}
+}
 
 int main(int argc, char *argv[])
 {
@@ -223,6 +238,7 @@ int main(int argc, char *argv[])
 	// initialize adc structure
 	adc.bp = &bp;
 	adc.period = SAMPLE_PERIOD_US;
+	adc.average = 1024;
 	adc.buf = malloc(BUFSZ*2);
 	if (!adc.buf) {
 		printf("%s: out of mem\n", __FUNCTION__);
@@ -236,14 +252,15 @@ int main(int argc, char *argv[])
 	printf("    ADC sample period    : %f us\n", adc.period); 
 
 #ifdef CONTINOUS
+	// setup buspirate to just shuffle readings
 	bp_read_adc_continous(adc.bp);
 #else
 	// create thread for triggering adc sampling
 	status = pthread_create(&tid, NULL, adc_trig_sample, &adc);
+#endif
 
 	// create thread for calculating and displaying avarage current
-//	status = pthread_create(&tid, NULL, adc_sample_avarage, &adc);
-#endif
+	status = pthread_create(&tid, NULL, adc_sample_avarage, &adc);
 
 	for (;;) {
 		sleep(1);
