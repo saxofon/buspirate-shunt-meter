@@ -14,6 +14,8 @@
 
 #include <buspirate.h>
 
+#undef RT_PRIO
+
 static int optimize_read_length(struct s_bp *bp, int len)
 {
 	int status;
@@ -118,19 +120,19 @@ static void *bp_reader(void *arg)
 
 	printf ("%s: begin\n", __FUNCTION__);
 
-#if 0
+#ifdef RT_PRIO
 	// setup thread priority
-	threadsched.sched_priority = 50;
+	threadsched.sched_priority = 40;
 
 	status = sched_setscheduler(0, SCHED_FIFO, &threadsched);
 	if (status) {
 		printf("%s: sched_setscheduler %d\n", __FUNCTION__, status);
 		pthread_exit(&bp_reader_status);
 	}
+#endif
 
 	// lock thread code into memory (don't swap this code segment)
 	mlockall(MCL_CURRENT | MCL_FUTURE);
-#endif
 
 	for (;;) {
 		if (bp->read_length) {
