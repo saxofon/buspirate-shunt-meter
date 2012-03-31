@@ -1,7 +1,7 @@
 #ifndef __BUSPIRATE_H__
 #define __BUSPIRATE_H__
 
-#define DEBUG
+#undef DEBUG
 
 #define BP_DEV_BAUDRATE             115200
 #define BP_MAX_READ_LEN             128

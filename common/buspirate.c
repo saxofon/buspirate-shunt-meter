@@ -144,13 +144,15 @@ static void *bp_reader(void *arg)
 			printf("%s: ERROR %d\n", __FUNCTION__, errno);
 			continue;
 		}
+
 #ifdef DEBUG
 		printf("%s: hexdump ", __FUNCTION__);
 		for (i=0; i<status; i++) {
 			printf("0x%2.2X ", bp->buf[i]);
 		}
-#endif
 		printf("\n");
+#endif
+
 		if ((status == 2) && (bp->cmd == BP_CMD_ADC_READ_SINGLESHOT)) {
 			if (bp->adc_read) {
 				memcpy(&adc_sample, bp->buf, 2);
