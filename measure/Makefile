@@ -1,3 +1,9 @@
+#
+# Copyright (C) 2012 Per Hallsmark <per@hallsmark.se>
+#
+# (see the files README and COPYING for more details)
+#
+
 CFLAGS += -g -ggdb -I../common
 
 LDFLAGS += -lpthread

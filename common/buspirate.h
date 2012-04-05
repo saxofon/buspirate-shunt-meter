@@ -1,3 +1,9 @@
+/*
+ * Copyright (C) 2012 Per Hallsmark <per@hallsmark.se>
+ *
+ * (see the files README and COPYING for more details)
+ */
+
 #ifndef __BUSPIRATE_H__
 #define __BUSPIRATE_H__
 

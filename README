@@ -1,0 +1,7 @@
+              Measuring current via a shunt and buspirate
+          ==================================================
+
+This little app uses a buspirate connected to a shunt in order to measure
+the current that flows over the shunt.
+The code is structured so that more types of measurements should be fairly
+easy to add.

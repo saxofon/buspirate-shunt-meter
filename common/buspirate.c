@@ -1,3 +1,9 @@
+/*
+ * Copyright (C) 2012 Per Hallsmark <per@hallsmark.se>
+ *
+ * (see the files README and COPYING for more details)
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
