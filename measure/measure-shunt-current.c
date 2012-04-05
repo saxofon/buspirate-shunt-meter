@@ -21,6 +21,10 @@
 #undef RT_PRIO
 #define CONTINOUS
 
+// define the resistance of the shunt we have in serie with the power feed.
+#define SHUNT_RESISTANCE 1.0
+
+
 // define our sample period
 // for continues mode, this depends on baudrate. We avarage to 10 bits and 2 bytes per read...
 #ifdef CONTINOUS
@@ -211,8 +215,8 @@ static void *adc_sample_avarage(void * arg)
 		average = average/average_nr;
 
 
-		printf("%s: averaging over %d samples gives %f V\n",
-			__FUNCTION__, average_nr, average);
+		printf("%s: averaging over %d samples gives %f A\n",
+			__FUNCTION__, average_nr, average / SHUNT_RESISTANCE);
 
 		
 	}
@@ -238,7 +242,7 @@ int main(int argc, char *argv[])
 	// initialize adc structure
 	adc.bp = &bp;
 	adc.period = SAMPLE_PERIOD_US;
-	adc.average = 1024;
+	adc.average = 8192;
 	adc.buf = malloc(BUFSZ*2);
 	if (!adc.buf) {
 		printf("%s: out of mem\n", __FUNCTION__);
