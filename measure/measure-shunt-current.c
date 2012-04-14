@@ -25,7 +25,7 @@
 
 #define DEBUG
 #undef RT_PRIO
-#define CONTINOUS
+#undef CONTINOUS
 
 // define the resistance of the shunt we have in serie with the power feed.
 #define SHUNT_RESISTANCE 1.0
@@ -36,15 +36,16 @@
 #ifdef CONTINOUS
 #define SAMPLE_PERIOD_US      (1000000.0/(BP_DEV_BAUDRATE/10.0/2.0))
 #else
-#define SAMPLE_PERIOD_US      25000.0
+#define SAMPLE_PERIOD_US      100000.0
 #endif
+#define SAMPLE_AVERAGES       ((int)(USEC_PER_SEC/SAMPLE_PERIOD_US))
 
 // Circular buffer storing ADC data
 // One buf-short represent one ADC reading, MSB in high byte.
 // Storage size set to one hour
-#define BUFSZ_HOURS    1
+#define BUFSZ_HOURS    0
 #define BUFSZ_MINUTES  0
-#define BUFSZ_SECOUNDS 0
+#define BUFSZ_SECOUNDS 10
 #define BUFSZ (int)((1000000.0/SAMPLE_PERIOD_US) * (BUFSZ_HOURS*3600+BUFSZ_MINUTES*60+BUFSZ_SECOUNDS))
 
 static struct s_adc {
@@ -63,6 +64,7 @@ static int adc_head_n_tail_diff(struct s_adc *adc)
 {
 	int diff;
 
+	__sync_synchronize();
 	if (adc->head >= adc->tail) {
 		diff = adc->head - adc->tail;
 	} else {
@@ -80,6 +82,7 @@ static int adc_head_n_tail_diff(struct s_adc *adc)
 static int adc_head_n_tail_update(struct s_adc *adc)
 {
 	// update tail pointer - only if we need to circulate over old data
+	__sync_synchronize();
 	if (adc_head_n_tail_diff(adc) == BUFSZ) {
 		if (adc->tail == BUFSZ) {
 			adc->tail = 0;
@@ -89,6 +92,7 @@ static int adc_head_n_tail_update(struct s_adc *adc)
 	}
 
 	// update head pointer
+	__sync_synchronize();
 	if (adc->head == BUFSZ) {
 		adc->head = 0;
 	} else {
@@ -213,10 +217,15 @@ static void *adc_sample_avarage(void * arg)
 		// calculate average
 		start = adc->head - average_nr;
 		if (start < 0)
-			start = BUFSZ + start;
+			start = BUFSZ - abs(start);
 		average = 0.0;
 		for (i=0; i<average_nr; i++) {
+#ifdef DEBUG
+			printf("%s: start %d\n", __FUNCTION__, start);
+#endif
 			average += adc->buf[start++]/1024.0*6.6;
+			if (start >= BUFSZ)
+				start = 0;
 		}
 		average = average/average_nr;
 
@@ -248,7 +257,7 @@ int main(int argc, char *argv[])
 	// initialize adc structure
 	adc.bp = &bp;
 	adc.period = SAMPLE_PERIOD_US;
-	adc.average = 8192;
+	adc.average = SAMPLE_AVERAGES;
 	adc.buf = malloc(BUFSZ*2);
 	if (!adc.buf) {
 		printf("%s: out of mem\n", __FUNCTION__);
