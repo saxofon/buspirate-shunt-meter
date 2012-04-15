@@ -20,16 +20,16 @@
 
 #include <ts.h>
 #include <buspirate.h>
+#include <rb.h>
 
 #define BP_DEV "/dev/buspirate"
 
-#define DEBUG
+#undef DEBUG
 #undef RT_PRIO
 #undef CONTINOUS
 
 // define the resistance of the shunt we have in serie with the power feed.
 #define SHUNT_RESISTANCE 1.0
-
 
 // define our sample period
 // for continues mode, this depends on baudrate. We avarage to 10 bits and 2 bytes per read...
@@ -38,7 +38,8 @@
 #else
 #define SAMPLE_PERIOD_US      100000.0
 #endif
-#define SAMPLE_AVERAGES       ((int)(USEC_PER_SEC/SAMPLE_PERIOD_US))
+//#define SAMPLE_AVERAGES       ((int)(USEC_PER_SEC/SAMPLE_PERIOD_US))
+#define SAMPLE_AVERAGES       1
 
 // Circular buffer storing ADC data
 // One buf-short represent one ADC reading, MSB in high byte.
@@ -50,58 +51,10 @@
 
 static struct s_adc {
 	struct s_bp *bp;
-	int head;
-	int tail;
+	struct s_rb *rb;
 	float period;
-	unsigned short *buf;
 	int average; // amount of samples to avarage over
 } adc;
-
-// adc_head_n_tail_diff return the active amount of sample data
-// retval > 0: active amount of data
-// retval == 0: no data collected
-static int adc_head_n_tail_diff(struct s_adc *adc)
-{
-	int diff;
-
-	__sync_synchronize();
-	if (adc->head >= adc->tail) {
-		diff = adc->head - adc->tail;
-	} else {
-		diff= adc->head + (BUFSZ - adc->tail) + 1;
-	}
-
-//	printf("%s: diff %d\n", __FUNCTION__, diff);
-
-	return diff;
-}
-
-// adc_head_n_tail_update - advances data head pointer and possibly the
-// tail pointer in case we need to circulate over old data (which happens
-// when recording is longer than buffer size admit)
-static int adc_head_n_tail_update(struct s_adc *adc)
-{
-	// update tail pointer - only if we need to circulate over old data
-	__sync_synchronize();
-	if (adc_head_n_tail_diff(adc) == BUFSZ) {
-		if (adc->tail == BUFSZ) {
-			adc->tail = 0;
-		} else {
-			adc->tail++;
-		}
-	}
-
-	// update head pointer
-	__sync_synchronize();
-	if (adc->head == BUFSZ) {
-		adc->head = 0;
-	} else {
-		adc->head++;
-	}
-
-//	printf("%s: head set to %d and tail set to %d\n", __FUNCTION__,
-//		adc->head, adc->tail);
-}
 
 // adc_sampler - this is a bp callback function
 static void adc_sampler(unsigned short reading)
@@ -109,9 +62,11 @@ static void adc_sampler(unsigned short reading)
 	int status;
 
 	// advance buffer pointer
-	status = adc_head_n_tail_update(&adc);
+	status = rb_head_n_tail_update(adc.rb);
 
-	adc.buf[adc.head] = reading;
+	RB_NODE(adc.rb, unsigned short) = reading;
+//	((unsigned short*)(adc.rb->buf))[adc.rb->head] = reading;
+//	adc.buf[adc.head] = reading;
 //	printf("%s: %f V\n", __FUNCTION__, adc.buf[adc.head]/1024.0*6.6);
 }
 
@@ -175,6 +130,7 @@ static void *adc_sample_avarage(void * arg)
 	int average_nr;
 	float average;
 	int i;
+	unsigned short node_data;
 
 	printf ("%s: begin\n", __FUNCTION__);
 
@@ -208,24 +164,21 @@ static void *adc_sample_avarage(void * arg)
 
 		// calulate nr of sample to average over
 		average_nr = adc->average;
-		if (average_nr > adc_head_n_tail_diff(adc))
-			average_nr = adc_head_n_tail_diff(adc);
+		if (average_nr > rb_head_n_tail_diff(adc->rb))
+			average_nr = rb_head_n_tail_diff(adc->rb);
 
 		if (average_nr == 0)
 			average = 1;
 
 		// calculate average
-		start = adc->head - average_nr;
-		if (start < 0)
-			start = BUFSZ - abs(start);
 		average = 0.0;
 		for (i=0; i<average_nr; i++) {
 #ifdef DEBUG
 			printf("%s: start %d\n", __FUNCTION__, start);
 #endif
-			average += adc->buf[start++]/1024.0*6.6;
-			if (start >= BUFSZ)
-				start = 0;
+			node_data = RB_NODE_IDX(adc->rb, unsigned short,
+				rb_head_minus(adc->rb,BUFSZ - i));
+			average += node_data/1024.0*6.6;
 		}
 		average = average/average_nr;
 
@@ -242,29 +195,32 @@ int main(int argc, char *argv[])
 	int status;
 	pthread_t tid;
 
-	// init circular buffer
+	// init super structure
 	memset(&adc, 0, sizeof(adc));
+	adc.bp = (struct s_bp *)malloc(sizeof(struct s_bp));
+	memset(adc.bp, 0, sizeof(struct s_bp));
+	adc.rb = (struct s_rb *)malloc(sizeof(struct s_rb));
+	memset(adc.rb, 0, sizeof(struct s_rb));
 
 	// initialize buspirate
-	status = bp_init(&bp, BP_DEV);
+	status = bp_init(adc.bp, BP_DEV);
 	if (status) {
 		exit(-1);
 	}
 
 	// install our ADC reading callback
-	bp_install_adc_read(&bp, adc_sampler);
+	bp_install_adc_read(adc.bp, adc_sampler);
 
 	// initialize adc structure
-	adc.bp = &bp;
 	adc.period = SAMPLE_PERIOD_US;
 	adc.average = SAMPLE_AVERAGES;
-	adc.buf = malloc(BUFSZ*2);
-	if (!adc.buf) {
-		printf("%s: out of mem\n", __FUNCTION__);
-	} else {
-		printf("%s: allocated %d bytes for circular buffer\n",
-			__FUNCTION__, BUFSZ*2);
+	status = rb_init(adc.rb, BUFSZ, sizeof(unsigned short));
+	if (status) {
+		exit(-1);
 	}
+
+//	status = rb_test();
+//	exit(0);
 
 	printf("Buspirate ADC sample-n-avarage\n");
 	printf("  Current config:\n");

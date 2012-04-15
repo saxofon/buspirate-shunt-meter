@@ -40,14 +40,14 @@
 
 #define BP_ATTEMPTS                 40
 
-static struct s_bp {
+struct s_bp {
 	int dev;
 	int cmd_state;
 	int cmd;
 	int read_length;
 	unsigned char buf[BP_MAX_READ_LEN];
 	void (*adc_read)(unsigned short);
-} bp;
+};
 
 // main routines
 extern int bp_init(struct s_bp *bp, char *dev);

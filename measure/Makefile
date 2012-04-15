@@ -11,6 +11,7 @@ LDFLAGS += -lrt
 
 OBJS += ../common/buspirate.o
 OBJS += ../common/ts.o
+OBJS += ../common/rb.o
 
 APPS += measure-shunt-current
 
